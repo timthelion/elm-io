@@ -90,9 +90,9 @@ animationPlayer animationQueCommandS =
    if qc.mode == aps.currentMode || qc.mode == AnyMode || aps.currentMode == AnyMode
    then
     case qc of
-     ClearCommandQue{} -> {aps|commandQue <- []}
-     ClearCommandQueAnd{} -> {aps|commandQue <- [qc.command]}
-     AddConcurrentAnimationImediately{} -> addConcurrentAnimation aps centiseconds qc.animation
+     ClearCommandQue -> {aps|commandQue <- []}
+     ClearCommandQueAnd -> {aps|commandQue <- [qc.command]}
+     AddConcurrentAnimationImediately -> addConcurrentAnimation aps centiseconds qc.animation
      _ -> {aps|commandQue <- aps.commandQue ++ [qc]}
    else 
     aps
@@ -120,33 +120,33 @@ animationPlayer animationQueCommandS =
   processNonAnimationCommands: Int -> AnimationPlayerState a -> AnimationPlayerState a
   processNonAnimationCommands centiseconds aps
    =  (case aps.commandQue of
-       (SetMode{newMode=nm}::cs) -> {aps|currentMode<-nm,commandQue<-cs} 
-       (AddConcurrentAnimation{animation=a}::cs)->
-         addConcurrentAnimation aps centiseconds a)
+       (SetMode{newMode}::cs) -> {aps|currentMode<-newMode,commandQue<-cs} 
+       (AddConcurrentAnimation{animation}::cs)->
+         addConcurrentAnimation aps centiseconds animation)
    |> processNonAnimationCommands aps
 
   renderCurrentAnimation: Int -> AnimationPlayerState a -> AnimationPlayerState a
   renderCurrentAnimation centiseconds aps =
    case aps.commandQue of
-    (PlayAnimation{animation=a}::cs) ->
+    (PlayAnimation{animation}::cs) ->
       let
        frame =
         calculateFrame
          centiseconds
          aps.startOfCurrentAnimation
-         a.framerate
+         animation.framerate
       in
-      if frame==a.numFrames
+      if frame==animation.numFrames
       then
-       {aps|commandQue=cs
-           ,startOfCurrentAnimation=centiseconds
-           ,previousFrame=0-1
-           ,previousRender=Nothing}
+       {aps|commandQue<-cs
+           ,startOfCurrentAnimation<-centiseconds
+           ,previousFrame<-0-1
+           ,previousRender<-Nothing}
        |> processTick centiseconds 
       else
        case (aps.previousFrame==frame,aps.previousRender) of
         (True,Just render) -> {aps|renderedFrames<-render::aps.renderedFrames}
-        _ ->  let render = a.render frame
+        _ ->  let render = animation.render frame
               in
               {aps|previousFrame <- frame
                   ,previousRender <- render
