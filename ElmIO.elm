@@ -91,7 +91,7 @@ widest elms = maximum <| map widthOf elms
 widthOfWidestSlideWord = round <| (toFloat <| widest slideWordElms) * 1.5
 
 scaleFactor: Int -> Int -> Float
-{-Scale w2 to be the same as w2-}
+{-Scale w2 to be the same as w1-}
 scaleFactor w1 w2 = toFloat w1 / toFloat w2
 
 scaleFactorOfSlideWordsBasedOnScreenWidth: Int -> Float
@@ -128,7 +128,7 @@ slideWordAnimation word =
   numFramesInSlidingWordMovement = numFramesInSlidWordsMovement - slidingWordFrameOffset
   slidingWordFrameOffset = 8
 
-  framerate' = 15
+  framerate' = 30
 
   render' frame =
    let
@@ -195,7 +195,7 @@ slideWordAnimationPlayCommand animation =
  Animation.PlayAnimation {mode=Animation.AnyMode,animation=animation}
 
 
-{-
+
 
 
 
@@ -206,13 +206,31 @@ slideWordAnimationPlayCommand animation =
 
 {- slogan zoom -}
 
-slogan =
- ["ELM"
- ,"the future was yesterday"
- ,"welcome to hypertime"]
+slogan = "ELM\nthe future was yesterday\nwelcome to hypertime"
+
+sloganElm = centered <| toText slogan
+
+sloganAnimation =
+ let
+  numFrames'=20
+  framerate'=10
+  maxSloganScaleFactor width = scaleFactor width (widthOf sloganElm)
+  sloganScale width frame =
+   1+((maxSloganScaleFactor width)-1)*((toFloat <| numFrames'-frame)/(toFloat numFrames'))
+  sloganForm frame width height
+   =  scale (sloganScale width frame)
+   <| toForm
+   <| sloganElm
+  render' frame = [sloganForm frame]
+ in
+ {numFrames=numFrames'
+ ,framerate=framerate'
+ ,render=render'}
+
+sloganAnimationCommands =
+ [Animation.PlayAnimation{mode=Animation.AnyMode,animation=sloganAnimation}]
 
 
-{- TODO -}
 
 
 
@@ -220,12 +238,7 @@ slogan =
 
 
 
-
-
-
-
-
-
+{-
 {- clock -}
 
 clockMiddle = slogan
@@ -331,6 +344,6 @@ elmLangWebPage = link "http://elm-lang.org" <| flow right [img "logo.png",plainT
 
 -}
 
-leGrandAnimationPlayer = Animation.animationPlayer slideWordAnimationPlayCommands (constant <| Animation.SetMode{mode=Animation.AnyMode,newMode=Animation.AnyMode})
+leGrandAnimationPlayer = Animation.animationPlayer (slideWordAnimationPlayCommands ++ sloganAnimationCommands) (constant <| Animation.SetMode{mode=Animation.AnyMode,newMode=Animation.AnyMode})
 
 main = (\(w,h) forms-> collage w h <| map (\form->form w h) <|  concat forms) <~ Window.dimensions ~ leGrandAnimationPlayer
