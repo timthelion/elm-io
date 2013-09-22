@@ -2,24 +2,27 @@
    http://creativecommons.org/publicdomain/zero/1.0/
    Timothy Hobbs                         -}
 
-{- TODO centiseconds type, rename centiseconds to now in most places -}
 module Animation where
 
 
 
-{- Animations are values which change over time -}
 
 
-data Animation a =
- Animation
+
+
+
+
+
+{- Animations produce values which change over time -}
+
+type Animation a =
   {numFrames: Int
   ,framerate: Int
   ,render: Int -> a {- frame -> a -}
   }
 
-data ConcurrentAnimation a =
- ConcurrentAnimation
-  {start: Int
+type ConcurrentAnimation a =
+  {start: Centiseconds
   ,previousFrame: Int
   ,previousRender: Maybe a
   ,animation: Animation a}
@@ -57,139 +60,217 @@ data Command a =
     {mode: Mode
     ,animation: Animation a}
   
+commandMode: Command a -> Mode
+commandMode com =
+ case com of
+  PlayAnimation v -> v.mode
+  ClearCommandQue v -> v.mode
+  ClearCommandQueAnd v -> v.mode
+  SetMode v -> v.mode
+  AddConcurrentAnimation v -> v.mode
+  AddConcurrentAnimationImediately v -> v.mode
 
 
 
-data AnimationPlayerState a =
- AnimationPlayerState
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+type AnimationPlayerState a =
   {currentMode: Mode
   ,commandQue: [Command a]
-  ,startOfCurrentAnimation: Int
+  ,startOfCurrentAnimation: Centiseconds
   ,previousFrame: Int
   ,previousRender: Maybe a
-  ,conncurrentAnimations: [ConcurrentAnimation a]
+  ,concurrentAnimations: [ConcurrentAnimation a]
   ,renderedFrames: [a]}
 
 
 
-{- An animation Player takes a stream of que commands and reacts to them. -}
-animationPlayer: Signal (AnimationQueCommand a) -> Signal [a]
-animationPlayer animationQueCommandS =
- let
-  initialAnimationPlayerState =
-   AnimationPlayerState
-    {currentMode=0
-    ,commandQue=[]
-    ,startOfCurrentAnimation=0
-    ,previousFrame=0-1
-    ,previousRender=Nothing
-    ,concurrentAnimations=[]
-    ,renderedFrames=[]}
 
-  processTickOrQueCommand (centiseconds,NoEvent qc) aps =
-   if qc.mode == aps.currentMode || qc.mode == AnyMode || aps.currentMode == AnyMode
+initialAnimationPlayerState: AnimationPlayerState a
+initialAnimationPlayerState =
+  {currentMode=AnyMode
+  ,commandQue=[]
+  ,startOfCurrentAnimation=0
+  ,previousFrame=0-1
+  ,previousRender=Nothing
+  ,concurrentAnimations=[]
+  ,renderedFrames=[]}
+
+processTickOrQueCommand: (Centiseconds,EventMarked (Command a)) -> AnimationPlayerState a -> AnimationPlayerState a
+processTickOrQueCommand (now,evc) aps =
+ case evc of
+  NoEvent com ->
+   if commandMode com == aps.currentMode
+                      ||
+      commandMode com == AnyMode
+                      ||
+      aps.currentMode == AnyMode
    then
-    case qc of
-     ClearCommandQue -> {aps|commandQue <- []}
-     ClearCommandQueAnd -> {aps|commandQue <- [qc.command]}
-     AddConcurrentAnimationImediately -> addConcurrentAnimation aps centiseconds qc.animation
-     _ -> {aps|commandQue <- aps.commandQue ++ [qc]}
+    case com of
+     ClearCommandQue _ -> {aps|commandQue <- []}
+     ClearCommandQueAnd v -> {aps|commandQue <- [v.command]}
+     AddConcurrentAnimationImediately v ->
+      addConcurrentAnimation aps now v.animation
+     _ -> {aps|commandQue <- aps.commandQue ++ [com]}
    else 
     aps
-  processTickOrQueCommand (centiseconds,BEvent _) aps
-   =  {aps|renderedFrames<-[]}
-   |> processTick
+  BEvent _ ->
+      {aps|renderedFrames<-[]}
+   |> processTick now
 
-  processTick: Int -> AnimationPlayerState a -> AnimationPlayerState a
-  processTick centiseconds aps
-   = aps
-   |> processNonAnimationCommands centiseconds
-   |> renderCurrentAnimation centiseconds
-   |> renderConcurrentAnimations centiseconds
+--processTick: Centiseconds -> AnimationPlayerState a -> AnimationPlayerState a
+processTick now aps
+ =  aps
+ |> processNonAnimationCommands now
+ |> renderCurrentAnimation now
+ |> renderConcurrentAnimations now
 
 
 
-  addConcurrentAnimation aps centiseconds animation =
-    {aps|concurrentAnimations<-
-          ConcurrentAnimation
-           {start=centiseconds
-           ,previousFrame=0-1
-           ,previousRender=Nothing
-           ,animation=animation} :: aps.concurrentAnimations}
+addConcurrentAnimation: AnimationPlayerState a -> Centiseconds -> Animation a -> AnimationPlayerState a 
+addConcurrentAnimation aps now animation =
+  let
+   --newConcurrentAnimation: ConcurrentAnimation a
+   newConcurrentAnimation =
+    {start=now
+    ,previousFrame=0-1
+    ,previousRender=Nothing
+    ,animation=animation} 
+  in
+  {aps|concurrentAnimations <- newConcurrentAnimation :: aps.concurrentAnimations}
 
-  processNonAnimationCommands: Int -> AnimationPlayerState a -> AnimationPlayerState a
-  processNonAnimationCommands centiseconds aps
-   =  (case aps.commandQue of
-       (SetMode{newMode}::cs) -> {aps|currentMode<-newMode,commandQue<-cs} 
-       (AddConcurrentAnimation{animation}::cs)->
-         addConcurrentAnimation aps centiseconds animation)
-   |> processNonAnimationCommands aps
+--processNonAnimationCommands:
+-- Centiseconds -> AnimationPlayerState a -> AnimationPlayerState a
+processNonAnimationCommands now aps
+ =  (case aps.commandQue of
+     (SetMode v::cs) -> {aps|currentMode<-v.newMode
+                            ,commandQue<-cs} 
+     (AddConcurrentAnimation v::cs)->
+       addConcurrentAnimation aps now v.animation)
+ |> processNonAnimationCommands now
 
-  renderCurrentAnimation: Int -> AnimationPlayerState a -> AnimationPlayerState a
-  renderCurrentAnimation centiseconds aps =
-   case aps.commandQue of
-    (PlayAnimation{animation}::cs) ->
-      let
-       frame =
-        calculateFrame
-         centiseconds
-         aps.startOfCurrentAnimation
-         animation.framerate
-      in
-      if frame==animation.numFrames
-      then
-       {aps|commandQue<-cs
-           ,startOfCurrentAnimation<-centiseconds
-           ,previousFrame<-0-1
-           ,previousRender<-Nothing}
-       |> processTick centiseconds 
-      else
-       case (aps.previousFrame==frame,aps.previousRender) of
-        (True,Just render) -> {aps|renderedFrames<-render::aps.renderedFrames}
-        _ ->  let render = animation.render frame
-              in
-              {aps|previousFrame <- frame
-                  ,previousRender <- render
-                  ,renderedFrames<-render::aps.renderedFrames}
-       
+currentAnimation: AnimationPlayerState a  -> Animation a
+currentAnimation aps =
+ case aps.commandQue of
+  (PlayAnimation{animation}::cs) ->
+   animation
 
-  renderConcurrentAnimations: Int -> AnimationPlayerState a -> AnimationPlayerState a
-  renderConcurrentAnimations centiseconds aps =
-   let
-    renderCAPairs = justs <| map (renderConcurrentAnimation centiseconds) aps.concurrentAnimations
-    newConcurrentAnimations = map snd renderCAPairs
-    renderings = map fst renderCAPairs
-   in
-   {aps|concurrentAnimations<-}
+nextCommands:  AnimationPlayerState a  -> [Command a]
+nextCommands aps =
+ case aps.commandQue of
+  (PlayAnimation{animation}::cs) ->
+   cs
 
-  renderConcurrentAnimation: Int -> ConcurrentAnimation a -> Maybe (a,ConcurrentAnimation a)
-  renderConcurrentAnimation centiseconds ca =
-   let
-    frame = calculateFrame centiseconds ca.start ca.animation
-   in
-   case (ca.previousFrame==frame,ca.animation.numframes==frame,ca.previousRender) of
-    (True,_,Just render) -> 
-     Just
-      (render
-      ,ca)
-    (_,True,_) -> Nothing
-    _ ->
-     let
-      render=ca.animation.render frame
-     in
-     Just
-      (render
-      ,{ca|animation={ca.animation|previousFrame  <- frame
-                                  ,previousRender <- Just render}})
-   
+--processEndOfAnimation: AnimationPlayerState a -> Centiseconds -> AnimationPlayerState a
+processEndOfAnimation aps now =
+  {aps|commandQue<-nextCommands aps
+      ,startOfCurrentAnimation<-now
+      ,previousFrame<-0-1
+      ,previousRender<-Nothing}
+  |> processTick now
 
-  tics = every <| 10*millisecond
+addRender aps render = {aps|renderedFrames<-render::aps.renderedFrames}
+
+renderCurrentAnimation' aps animation frame =
+  let
+   render = animation.render frame
+  in
+   {aps|previousFrame  <- frame
+       ,previousRender <- Just render
+       ,renderedFrames <-render::aps.renderedFrames}
+
+continueRenderingThisAnimation: AnimationPlayerState a -> Animation a -> Int -> AnimationPlayerState a
+continueRenderingThisAnimation aps animation frame =
+ case (aps.previousFrame==frame,aps.previousRender) of
+  (True,Just render) -> addRender aps render {- from cache -}
+  _                  -> renderCurrentAnimation' aps animation frame {- anew -}
+
+--renderCurrentAnimation: Centiseconds -> AnimationPlayerState a -> AnimationPlayerState a
+renderCurrentAnimation now aps =
+ let
+  animation = currentAnimation aps
+  frame =
+   calculateFrame
+    now
+    aps.startOfCurrentAnimation
+    animation.framerate
  in
-  .renderedFrames <~
-   foldp
-    processTickOrQueCommand
-    initialAnimationPlayerState
-    <| (,) <~ count tics ~ animationQueCommandS
+ if frame==animation.numFrames
+ then processEndOfAnimation aps now
+ else continueRenderingThisAnimation aps animation frame
+
+--renderConcurrentAnimations: Centiseconds -> AnimationPlayerState a -> AnimationPlayerState a
+renderConcurrentAnimations now aps =
+ let
+
+  renderCAPairs =  justs
+                <| map
+                    (renderConcurrentAnimation now)
+                    aps.concurrentAnimations
+
+  newConcurrentAnimations = map snd renderCAPairs
+
+  renderings = map fst renderCAPairs
+ in
+ {aps|concurrentAnimations <- newConcurrentAnimations
+     ,renderedFrames       <- aps.renderedFrames++renderings}
+
+--renderConcurrentAnimation: Centiseconds -> ConcurrentAnimation a -> Maybe (a,ConcurrentAnimation a)
+renderConcurrentAnimation now ca =
+ let
+--  animation: Animation a
+  animation = ca.animation
+  frame = calculateFrame now ca.start animation.framerate
+  fromCache render = Just (render ,ca)
+  frameChange = ca.previousFrame /= frame
+  animationEnd = animation.numFrames == frame
+  renderAnew =
+   let
+    render=animation.render frame
+     
+    ca'={ca|previousFrame  <- frame
+           ,previousRender <- Just render}
+   in
+   Just (render,ca')
+ 
+ in
+ case (frameChange,animationEnd,ca.previousRender) of
+  (False,_,Just render) -> fromCache render
+  (_,True,_) -> Nothing
+  _ -> renderAnew
+
+tics: Signal Time
+tics = every <| 10*millisecond
+
+extractRenderedFrames: Signal (AnimationPlayerState a) -> Signal [a]
+extractRenderedFrames apsS = .renderedFrames <~ apsS
+
+foldAnimationPlayerState: Signal (Command a) -> Signal (AnimationPlayerState a)
+foldAnimationPlayerState animationQueCommandS =
+ foldp
+  processTickOrQueCommand
+  initialAnimationPlayerState
+  <| (,) <~ count tics ~ eventMarkA (SetMode {mode=AnyMode,newMode=AnyMode}) animationQueCommandS tics
+
+
+
+{- An animation Player takes a stream of que commands and reacts to them. -}
+animationPlayer: Signal (Command a) -> Signal [a]
+animationPlayer animationQueCommandS =
+ extractRenderedFrames <| foldAnimationPlayerState animationQueCommandS
 
 
 
@@ -197,34 +278,66 @@ animationPlayer animationQueCommandS =
 
 
 
-
-
-
-
+type Centiseconds = Int
 
 {-Takes the number of centiseconds since the start of time, the start time of the animation animation and returns the frame number. -}
-calculateFrame: Int -> Int -> Int -> Int
-calculateFrame centiseconds start framerate =
+calculateFrame: Centiseconds -> Centiseconds -> Int -> Int
+calculateFrame now start framerate =
  let
   centisecondsPerFrame = div 100 framerate
  in
- div (centiseconds-start) centisecondsPerFrame
+ div (now-start) centisecondsPerFrame
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 data EventMarked a = BEvent a | NoEvent a
+
+mkNoEvent: a -> Bool -> (EventMarked a, Bool)
+mkNoEvent a alternator = (NoEvent a,alternator)
+
+mkBEvent: a -> Bool -> (EventMarked a, Bool)
+mkBEvent a alternator = (BEvent a,alternator)
+
+alternate: a -> Bool -> Bool
+alternate _ oldAlternator = not oldAlternator
+
+alternatorS: Signal b -> Signal Bool
+alternatorS sb = foldp alternate True sb
+
 eventMarkA: a -> Signal a -> Signal b -> Signal (EventMarked a)
 eventMarkA aInit sa sb =
  let
-  alternate _ oldAlternator = not oldAlternator
-  alternatorS = foldp alternate True sb
+--  alternatorAndAS: Signal (a,Bool)
+  alternatorAndAS = (,) <~ sa ~ alternatorS sb
 
-  alternatorAndAS = (,) <~ alternatorS ~ sa
-
-  markEvents (a,newAlternator) (a,oldAlternator) =
-   if newAlternator == oldAlternator
-   then NoEvent a
-   else BEvent a
+--  markEvents: (a,Bool) -> (EventMarked a,Bool) -> (EventMarked a,Bool)
+  markEvents (a,newAlternator) (_,oldAlternator) =
+   case newAlternator == oldAlternator of
+    True ->
+     mkNoEvent a newAlternator
+    False ->
+     mkBEvent a newAlternator
+  
+--  foldInit: (EventMarked a, Bool)
+  foldInit = (NoEvent aInit,True)
   
  in
- fst <~ foldp markEvents (aInit,True) alternatorAndAS
+ fst <~ foldp markEvents foldInit alternatorAndAS
