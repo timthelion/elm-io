@@ -99,10 +99,10 @@ type AnimationPlayerState a =
 
 
 
-initialAnimationPlayerState: AnimationPlayerState a
-initialAnimationPlayerState =
+initialAnimationPlayerState: [Command a] -> AnimationPlayerState a
+initialAnimationPlayerState initialCommands =
   {currentMode=AnyMode
-  ,commandQue=[]
+  ,commandQue=initialCommands
   ,startOfCurrentAnimation=0
   ,previousFrame=0-1
   ,previousRender=Nothing
@@ -130,6 +130,7 @@ processTickOrQueCommand (now,evc) aps =
   BEvent _ ->
       {aps|renderedFrames<-[]}
    |> processTick now
+  Uninitialized -> aps
 
 --processTick: Centiseconds -> AnimationPlayerState a -> AnimationPlayerState a
 processTick now aps
@@ -157,10 +158,11 @@ addConcurrentAnimation aps now animation =
 processNonAnimationCommands now aps
  =  (case aps.commandQue of
      (SetMode v::cs) -> {aps|currentMode<-v.newMode
-                            ,commandQue<-cs} 
+                            ,commandQue<-cs} |> processNonAnimationCommands now
      (AddConcurrentAnimation v::cs)->
-       addConcurrentAnimation aps now v.animation)
- |> processNonAnimationCommands now
+       addConcurrentAnimation aps now v.animation|> processNonAnimationCommands now
+     _ -> aps)
+ 
 
 currentAnimation: AnimationPlayerState a  -> Animation a
 currentAnimation aps =
@@ -258,19 +260,19 @@ tics = every <| 10*millisecond
 extractRenderedFrames: Signal (AnimationPlayerState a) -> Signal [a]
 extractRenderedFrames apsS = .renderedFrames <~ apsS
 
-foldAnimationPlayerState: Signal (Command a) -> Signal (AnimationPlayerState a)
-foldAnimationPlayerState animationQueCommandS =
+foldAnimationPlayerState: [Command a] -> Signal (Command a) -> Signal (AnimationPlayerState a)
+foldAnimationPlayerState initialCommands animationQueCommandS =
  foldp
   processTickOrQueCommand
-  initialAnimationPlayerState
-  <| (,) <~ count tics ~ eventMarkA (SetMode {mode=AnyMode,newMode=AnyMode}) animationQueCommandS tics
+  (initialAnimationPlayerState initialCommands)
+  <| (,) <~ count tics ~ eventMarkA animationQueCommandS tics
 
 
 
 {- An animation Player takes a stream of que commands and reacts to them. -}
-animationPlayer: Signal (Command a) -> Signal [a]
-animationPlayer animationQueCommandS =
- extractRenderedFrames <| foldAnimationPlayerState animationQueCommandS
+animationPlayer: [Command a] -> Signal (Command a) -> Signal [a]
+animationPlayer initialCommands animationQueCommandS =
+ extractRenderedFrames <| (foldAnimationPlayerState initialCommands) animationQueCommandS
 
 
 
@@ -308,7 +310,7 @@ calculateFrame now start framerate =
 
 
 
-data EventMarked a = BEvent a | NoEvent a
+data EventMarked a = BEvent a | NoEvent a | Uninitialized
 
 mkNoEvent: a -> Bool -> (EventMarked a, Bool)
 mkNoEvent a alternator = (NoEvent a,alternator)
@@ -322,8 +324,8 @@ alternate _ oldAlternator = not oldAlternator
 alternatorS: Signal b -> Signal Bool
 alternatorS sb = foldp alternate True sb
 
-eventMarkA: a -> Signal a -> Signal b -> Signal (EventMarked a)
-eventMarkA aInit sa sb =
+eventMarkA: Signal a -> Signal b -> Signal (EventMarked a)
+eventMarkA sa sb =
  let
 --  alternatorAndAS: Signal (a,Bool)
   alternatorAndAS = (,) <~ sa ~ alternatorS sb
@@ -337,7 +339,7 @@ eventMarkA aInit sa sb =
      mkBEvent a newAlternator
   
 --  foldInit: (EventMarked a, Bool)
-  foldInit = (NoEvent aInit,True)
+  foldInit = (Uninitialized,True)
   
  in
  fst <~ foldp markEvents foldInit alternatorAndAS

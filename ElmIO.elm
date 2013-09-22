@@ -13,6 +13,7 @@ module ElmIO where
 
 
 import Animation
+import Window
 
 
 
@@ -30,16 +31,16 @@ l !! i = head <| drop i l
 
 
 {-Returns the y cordinate a form should have in order to have its bottom at a certain above the floor of a collage.-}
-bottomAt: Int -> Int -> Int -> Int
+bottomAt: Int -> Int -> Int -> Float
 bottomAt collageHeight goalAltitude formHeight = extremeAt collageHeight goalAltitude formHeight
 
-leftSideAt: Int -> Int -> Int -> Int
+leftSideAt: Int -> Int -> Int -> Float
 leftSideAt collageWidth goalDistance formWidth = extremeAt collageWidth goalDistance formWidth 
 
 {-Returns the cordinate an form should have in order to have its side at a certain distance from the side of a collage.
 
 Negate to flip.-}
-extremeAt: Int -> Int -> Int -> Int
+extremeAt: Int -> Int -> Int -> Float
 extremeAt collageDimension goalDistance formDimension =
  let
   halfDimensionOf int = toFloat int / 2
@@ -69,14 +70,15 @@ slideWords =
  ,"Better."
  ,"Smarter."
  ,"Stronger."
- ,"More interoptable."
- ,"More interactive."
- ,"More inteligent."
- ,"More exciting."
- ,"More universal."
- ,"More pragmatic."
- ,"More Fantastic."
- ,""
+ ," "
+ ,"Interoptable."
+ ,"Interactive."
+ ,"Inteligent."
+ ," "
+ ,"Universal."
+ ,"Pragmatic."
+ ,"Fantastic."
+ ," "
  ,"Faster."
  ,"Classier."
  ,"Sassier."]
@@ -86,7 +88,7 @@ slideWordElms = map plainText slideWords
 widest: [Element] -> Int
 widest elms = maximum <| map widthOf elms
 
-widthOfWidestSlideWord = widest slideWordElms
+widthOfWidestSlideWord = round <| (toFloat <| widest slideWordElms) * 1.5
 
 scaleFactor: Int -> Int -> Float
 {-Scale w2 to be the same as w2-}
@@ -98,9 +100,10 @@ scaleFactorOfSlideWordsBasedOnScreenWidth screenWidth =
 
 heightOfScaledSlideWords screenWidth
                             =
+                        round <|
  scaleFactorOfSlideWordsBasedOnScreenWidth screenWidth
                             *
-             heightOf (head slideWordElms)
+             (toFloat <| heightOf (head slideWordElms))
 
 {- Given the number of words in the list, the unscaled height of a word and the scaled width of the longest word give the scaled height of the whole list. -}
 scaledWordListHeight: Int -> Int -> Int
@@ -108,60 +111,91 @@ scaledWordListHeight numWords screenWidth =
  numWords * heightOfScaledSlideWords screenWidth
 
 
+scaledWidth: Int -> Element -> Int
+scaledWidth width elm = round <| scaleFactorOfSlideWordsBasedOnScreenWidth width * (toFloat <| widthOf elm)
 
 
 
 
 
 
-
-slideWordAnimation: Int -> Animation Element
+slideWordAnimation: Int -> Animation.Animation [Int -> Int -> Form]
 slideWordAnimation word =
  let
 
-  numFrames' = 20
-  numFramesInMovement = 15
+  numFrames' = 25
+  numFramesInSlidWordsMovement = 20 
+  numFramesInSlidingWordMovement = numFramesInSlidWordsMovement - slidingWordFrameOffset
+  slidingWordFrameOffset = 8
 
-  frameRate' = 20
+  framerate' = 15
 
-  render' width height frame =
+  render' frame =
    let
+    slidWordsFrame = min frame numFramesInSlidWordsMovement
+    slidingWordFrame = max 0 (slidWordsFrame-slidingWordFrameOffset)
 
     slidWords = take word slideWords
-    slidWordsAltitude =
+    slidWordsAltitude width =
      round <|
-       toFloat heightOfScaledSlideWords width
+       toFloat (heightOfScaledSlideWords width)
                       *
-       (toFloat frame/toFloat numFramesInMovement)
-    slidWordsForm
+       (toFloat slidWordsFrame/toFloat numFramesInSlidWordsMovement)
+
+    slidWordElms = take word slideWordElms
+    slidWordsElm = flow down slidWordElms
+
+    slidWordsForm width height
       =  moveY
-         (bottomAt height slidWordsAltitude <| scaledWordListHeight word)
+         (bottomAt height (slidWordsAltitude width) <| scaledWordListHeight word width)
+      <| moveX
+         (leftSideAt width 0 (scaledWidth width slidWordsElm))
+      <| scale (scaleFactorOfSlideWordsBasedOnScreenWidth width)
       <| toForm
-      <| flow down slidWordElms
+      <| slidWordsElm
 
 
+    slidingWordLocation width =
+     round <|
+      (toFloat width)
+             -
+     (toFloat slidingWordFrame)*(toFloat width/toFloat numFramesInSlidingWordMovement)
 
     slidingWord = slideWords !! word
-    slidingWordForm = 
+    slidingWordElm = plainText slidingWord
+
+    slidingWordForm width height
+     =  moveY
+         (bottomAt height 0 <| heightOfScaledSlideWords width)
+     <| moveX
+         (leftSideAt width (slidingWordLocation width) (scaledWidth width slidingWordElm))
+     <| scale (scaleFactorOfSlideWordsBasedOnScreenWidth width)
+     <| toForm
+     <| slidingWordElm
 
    in
-   collage width height [slidWordsForm,slidingWordForm]
+   [slidWordsForm,slidingWordForm]
  in
- Animation
   {numFrames = numFrames'
   ,framerate = framerate'
   ,render = render'
   }
 
-slideWordAnimations: [Animation Element]
+slideWordAnimations: [Animation.Animation [Int->Int->Form]]
 slideWordAnimations
   =
  map slideWordAnimation [0..length slideWords-1]
 
- 
+slideWordAnimationPlayCommands: [Animation.Command [Int->Int->Form]]
+slideWordAnimationPlayCommands =
+ map slideWordAnimationPlayCommand slideWordAnimations
+
+slideWordAnimationPlayCommand: Animation.Animation [Int->Int->Form] -> Animation.Command [Int->Int->Form]
+slideWordAnimationPlayCommand animation =
+ Animation.PlayAnimation {mode=Animation.AnyMode,animation=animation}
 
 
-
+{-
 
 
 
@@ -279,3 +313,24 @@ clockSecconds = {- NOTE! MUST BE EXACTLY 60 ELEMENTS LONG! -}
 
 -- TODO Add white background.
 elmLangWebPage = link "http://elm-lang.org" <| flow right [img "logo.png",plainText "elm-lang.org"]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-}
+
+leGrandAnimationPlayer = Animation.animationPlayer slideWordAnimationPlayCommands (constant <| Animation.SetMode{mode=Animation.AnyMode,newMode=Animation.AnyMode})
+
+main = (\(w,h) forms-> collage w h <| map (\form->form w h) <|  concat forms) <~ Window.dimensions ~ leGrandAnimationPlayer
