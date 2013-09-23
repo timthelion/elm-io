@@ -80,6 +80,7 @@ slideWords =
  ,"Fantastic."
  ," "
  ,"Faster."
+ ,"Sexier."
  ,"Classier."
  ,"Sassier."]
 
@@ -186,13 +187,19 @@ slideWordAnimations
   =
  map slideWordAnimation [0..length slideWords-1]
 
+slideWordsMode = 0
+
 slideWordAnimationPlayCommands: [Animation.Command [Int->Int->Form]]
 slideWordAnimationPlayCommands =
+ Animation.SetMode {mode=Animation.AnyMode,newMode=Animation.Mode slideWordsMode}::
  map slideWordAnimationPlayCommand slideWordAnimations
+ ++
+ [Animation.Wait{mode=Animation.Mode slideWordsMode,delay=50}
+ ,Animation.SetMode{mode=Animation.Mode slideWordsMode,newMode=Animation.Mode sloganMode}]
 
 slideWordAnimationPlayCommand: Animation.Animation [Int->Int->Form] -> Animation.Command [Int->Int->Form]
 slideWordAnimationPlayCommand animation =
- Animation.PlayAnimation {mode=Animation.AnyMode,animation=animation}
+ Animation.PlayAnimation {mode=Animation.Mode slideWordsMode,animation=animation}
 
 
 
@@ -206,13 +213,13 @@ slideWordAnimationPlayCommand animation =
 
 {- slogan zoom -}
 
-slogan = "ELM\nthe future was yesterday\nwelcome to hypertime"
+slogan = "ELM:\nthe future was yesterday\nwelcome to hypertime"
 
 sloganElm = centered <| toText slogan
 
 sloganAnimation =
  let
-  numFrames'=20
+  numFrames'=25
   framerate'=10
   maxSloganScaleFactor width = scaleFactor width (widthOf sloganElm)
   sloganScale width frame =
@@ -227,8 +234,11 @@ sloganAnimation =
  ,framerate=framerate'
  ,render=render'}
 
+sloganMode=1
+
 sloganAnimationCommands =
- [Animation.PlayAnimation{mode=Animation.AnyMode,animation=sloganAnimation}]
+ [Animation.PlayAnimation{mode=Animation.Mode sloganMode,animation=sloganAnimation}
+ ,Animation.SetMode{mode=Animation.Mode sloganMode,newMode=Animation.Mode clockMode}]
 
 
 
@@ -238,14 +248,13 @@ sloganAnimationCommands =
 
 
 
-{-
+
 {- clock -}
 
 clockMiddle = slogan
 
-clockSecconds = {- NOTE! MUST BE EXACTLY 60 ELEMENTS LONG! -}
- [
- ,("ELM","Experience Limitless Momentum")
+clockSeconds = {- NOTE! MUST BE EXACTLY 60 ELEMENTS LONG! -}
+ [("ELM","Experience Limitless Momentum")
  ,("Explore","new possibilities with functional expressivism") 
  ,("Experience","the joy of deploying solid code") 
  ,("Establishes","a new platform for new ideas and new directions")
@@ -262,7 +271,7 @@ clockSecconds = {- NOTE! MUST BE EXACTLY 60 ELEMENTS LONG! -}
  ,("Ceaseless","improvement with each release")
  ,("Central","perspective, global impact")
  ,("Meaningful","bring real value to your customers with real code")
- ,("Modular","fully featured module system lets you build truely amazing applications")
+ ,("Modular","assemble truely amazing applications")
  ,("Discover","the power of functional reactive professionalism") 
  ,("Design","the way you imagine") 
  ,("Direct","the future with the power of ELM") 
@@ -287,28 +296,104 @@ clockSecconds = {- NOTE! MUST BE EXACTLY 60 ELEMENTS LONG! -}
  ,("Introduce","unseen simplicity with unknown power")
  ,("Wow","I never knew it could be this easy")
  ,("World changing","don't just wait for the future, be there")
- ,("Web 4.0","join web 4.0, using modern language features on top of JavaScript")
- ,("Generates","carefully optimized JavaScript code hand crafted for your browser of choice")
- ,("Georgeous","create georgeous websites with Elm's built in algorithmic color support")
- ,("Genereralize","even the most complex algorithms for re-use and value enhancement")
+ ,("Web 4.0","modern language features on top of JavaScript")
+ ,("Generates","EMCAscript hand crafted for your browser of choice")
+ ,("Georgeous","algorithmic color support")
+ ,("Genereralize","for re-use and value enhancement")
  ,("Runs everywhere","on any device that supports HTML and JavaScript")
  ,("React","to marked demands with unmatched productivity")
  ,("Hotswap","out code for testing and real time development")
  ,("Graphs","of signals put you in a whole new dimension")
  ,("Argot free","no words to learn just GO!")
  ,("Artful","syntax makes your code a pleasure to view")
- ,("Allocate","team reasorces more effectively with a functional modular design")
+ ,("Allocate","team reasorces more effectively with modular design")
  ,("Automatically","find bugs with a compiler that almost codes for you")
  ,("Banish","errors with resiliant models")
- ,("Beat","the neighborhood by being in the functional game first")
  ,("Biologically","inspired automaton goodness")
- ,("Bootstrap","your reactive journey with hundreds of enlightening examples")
+ ,("Bootstrap","your reactive journey with interactive documentation")
  ,("Bring","new perspective with a new paradigm")
  ,("Panoramic","understanding of expression througout the full stack")
  ,("Open source","assurance of quality from all angles")
  ]
 
+clockWords = map fst clockSeconds
+clockWordElms = map plainText clockWords
+clockWordForms' = map toForm clockWordElms
 
+numberedClockWordForms = zip clockWordForms' <| tail <| scanl (\f c->c+1) 0 clockWordForms'
+
+clockForms time frame =
+ [--hourHand time
+ --,minuteHand time
+ sloganBackground time
+ ,currentSlogan time]++
+ clockWordForms time frame
+
+currentSlogan time width height =
+ let
+  thisSecond = 
+   clockSeconds !! (59 - (rem (floor <| inSeconds time) 60))
+  keyWord
+   =  righted
+   <| bold 
+   <| toText
+   <| (\kw->kw++" ")
+   <| fst thisSecond
+  expression
+   =  plainText 
+   <| snd thisSecond
+ in
+    toForm
+ <| flow right [keyWord, expression]
+
+sloganBackground time width height
+ =   filled blue
+ <|  rect (toFloat width)
+          (toFloat <| heightOf <| head clockWordElms)
+
+clockWordForms time frame = map (placeWord time frame) numberedClockWordForms
+
+placeWord time frame (form,n) width height =
+ let
+   --movementFrame = max (frame - 5) 0
+   --partialDeg = (5/(5-(toFloat movementFrame))) - 1
+   degs  = 90 - 6 * (toFloat (floor <| inSeconds time)+n) + 90
+   rotDegs = degs + 180
+   angle = degrees degs -- Stolen! http://elm-lang.org/edit/examples/Intermediate/Clock.elm
+   len = ((toFloat<|min width height)/2) - 50
+  in
+    rotate (degrees rotDegs)
+ <| moveX (toFloat width / 2)
+ <| move (len * cos angle, len * sin angle)
+ <| form
+
+hourHand time width height = hand red 60 80 (time/720)
+minuteHand time width height = hand blue 60 100 (time/60)
+
+
+vector len angle = (len * cos angle, len * sin angle)
+
+hand clr gap len time = --Stolen! http://elm-lang.org/edit/examples/Intermediate/Clock.elm
+  let angle = degrees (90 - 6 * inSeconds time)
+  in  traced (solid clr) <| segment (vector gap angle) (vector len angle)
+
+clockMode=2
+
+makeClockCommand time =
+ Animation.ClearCommandQueAnd
+ {mode=Animation.Mode clockMode
+ ,command=
+ Animation.PlayAnimation
+  {mode=Animation.Mode clockMode
+  ,animation=
+   {framerate=100
+   ,numFrames=1
+   ,render = clockForms time
+   }
+  }
+ }
+
+clockAnimationCommandSignal = makeClockCommand <~ every second
 
 
 
@@ -325,7 +410,7 @@ clockSecconds = {- NOTE! MUST BE EXACTLY 60 ELEMENTS LONG! -}
 
 
 -- TODO Add white background.
-elmLangWebPage = link "http://elm-lang.org" <| flow right [img "logo.png",plainText "elm-lang.org"]
+--elmLangWebPage = link "http://elm-lang.org" <| flow right [img "logo.png",plainText "elm-lang.org"]
 
 
 
@@ -342,8 +427,11 @@ elmLangWebPage = link "http://elm-lang.org" <| flow right [img "logo.png",plainT
 
 
 
--}
 
-leGrandAnimationPlayer = Animation.animationPlayer (slideWordAnimationPlayCommands ++ sloganAnimationCommands) (constant <| Animation.SetMode{mode=Animation.AnyMode,newMode=Animation.AnyMode})
+
+leGrandAnimationPlayer =
+ Animation.animationPlayer
+ []--(slideWordAnimationPlayCommands ++ sloganAnimationCommands)
+ clockAnimationCommandSignal
 
 main = (\(w,h) forms-> collage w h <| map (\form->form w h) <|  concat forms) <~ Window.dimensions ~ leGrandAnimationPlayer

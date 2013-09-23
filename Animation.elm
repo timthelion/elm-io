@@ -45,6 +45,9 @@ data Command a =
    PlayAnimation {- adds an animation to be played to the que -}
     {mode: Mode
     ,animation: Animation a}
+ | Wait
+    {mode: Mode
+    ,delay: Centiseconds}
  | ClearCommandQue
     {mode: Mode}
  | ClearCommandQueAnd
@@ -136,10 +139,14 @@ processTickOrQueCommand (now,evc) aps =
 processTick now aps
  =  aps
  |> processNonAnimationCommands now
- |> renderCurrentAnimation now
+ |> (\aps' -> if thereIsAnAnimation aps' then renderCurrentAnimation now aps' else usePreviousRender aps')
  |> renderConcurrentAnimations now
 
-
+usePreviousRender: AnimationPlayerState a -> AnimationPlayerState a
+usePreviousRender aps =
+ case aps.previousRender of
+  Just render -> addRender aps render
+  Nothing -> aps
 
 addConcurrentAnimation: AnimationPlayerState a -> Centiseconds -> Animation a -> AnimationPlayerState a 
 addConcurrentAnimation aps now animation =
@@ -159,16 +166,30 @@ processNonAnimationCommands now aps
  =  (case aps.commandQue of
      (SetMode v::cs) -> {aps|currentMode<-v.newMode
                             ,commandQue<-cs} |> processNonAnimationCommands now
-     (AddConcurrentAnimation v::cs)->
+     (AddConcurrentAnimation v::cs) ->
        addConcurrentAnimation aps now v.animation|> processNonAnimationCommands now
+     (Wait v::cs) ->
+       let
+        waitAnimation=
+         case aps.previousRender of
+          Just render ->
+           {numFrames=v.delay
+           ,framerate=100
+           ,render=(\_->render)}
+       in
+       {aps|commandQue<-PlayAnimation {mode=v.mode,animation=waitAnimation}::cs}
      _ -> aps)
  
+thereIsAnAnimation: AnimationPlayerState a -> Bool
+thereIsAnAnimation aps =
+ case aps.commandQue of
+  PlayAnimation{animation}::cs -> True
+  [] -> False
 
 currentAnimation: AnimationPlayerState a  -> Animation a
 currentAnimation aps =
  case aps.commandQue of
-  (PlayAnimation{animation}::cs) ->
-   animation
+  PlayAnimation{animation}::cs -> animation
 
 nextCommands:  AnimationPlayerState a  -> [Command a]
 nextCommands aps =
@@ -180,8 +201,7 @@ nextCommands aps =
 processEndOfAnimation aps now =
   {aps|commandQue<-nextCommands aps
       ,startOfCurrentAnimation<-now
-      ,previousFrame<-0-1
-      ,previousRender<-Nothing}
+      ,previousFrame<-0-1}
   |> processTick now
 
 addRender aps render = {aps|renderedFrames<-render::aps.renderedFrames}
@@ -198,6 +218,7 @@ continueRenderingThisAnimation: AnimationPlayerState a -> Animation a -> Int -> 
 continueRenderingThisAnimation aps animation frame =
  case (aps.previousFrame==frame,aps.previousRender) of
   (True,Just render) -> addRender aps render {- from cache -}
+  (True,Nothing)     -> aps --Shouldn't happen
   _                  -> renderCurrentAnimation' aps animation frame {- anew -}
 
 --renderCurrentAnimation: Centiseconds -> AnimationPlayerState a -> AnimationPlayerState a
