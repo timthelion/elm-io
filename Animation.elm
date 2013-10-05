@@ -19,7 +19,22 @@ type Animation a =
   {numFrames: Int
   ,framerate: Int
   ,render: Int -> a {- frame -> a -}
+  ,stamp: Bool
+  ,id: Maybe Int
   }
+
+type SimpleAnimation a =
+  {numFrames: Int
+  ,framerate: Int
+  ,render: Int -> a {- frame -> a -}}
+
+mkAnimation: SimpleAnimation a -> Animation a
+mkAnimation simple =
+ {numFrames=simple.numFrames
+ ,framerate=simple.framerate
+ ,render=simple.render
+ ,stamp=False
+ ,id=Nothing}
 
 type ConcurrentAnimation a =
   {start: Centiseconds
@@ -62,6 +77,12 @@ data Command a =
  | AddConcurrentAnimationImediately {- Does NOT clear the command que -}
     {mode: Mode
     ,animation: Animation a}
+ | DeleteStamp
+    {mode: Mode
+    ,id: Maybe Int}
+ | DeleteConcurrentAnimation
+    {mode: Mode
+    ,id: Maybe Int}
   
 commandMode: Command a -> Mode
 commandMode com =
@@ -81,6 +102,10 @@ commandMode com =
 
 
 
+type Stamp a =
+ {id: Maybe Int
+ ,renderedFrame: a}
+
 
 
 
@@ -97,7 +122,8 @@ type AnimationPlayerState a =
   ,previousFrame: Int
   ,previousRender: Maybe a
   ,concurrentAnimations: [ConcurrentAnimation a]
-  ,renderedFrames: [a]}
+  ,renderedFrames: [a]
+  ,stamps: [Stamp a]}
 
 
 
@@ -110,7 +136,8 @@ initialAnimationPlayerState initialCommands =
   ,previousFrame=0-1
   ,previousRender=Nothing
   ,concurrentAnimations=[]
-  ,renderedFrames=[]}
+  ,renderedFrames=[]
+  ,stamps=[]}
 
 processTickOrQueCommand: (Centiseconds,EventMarked (Command a)) -> AnimationPlayerState a -> AnimationPlayerState a
 processTickOrQueCommand (now,evc) aps =
@@ -141,6 +168,11 @@ processTick now aps
  |> processNonAnimationCommands now
  |> (\aps' -> if thereIsAnAnimation aps' then renderCurrentAnimation now aps' else usePreviousRender aps')
  |> renderConcurrentAnimations now
+ |> stampStamps
+
+stampStamps: AnimationPlayerState a -> AnimationPlayerState a
+stampStamps aps =
+ {aps|renderedFrames<-aps.renderedFrames++map (\stamp->stamp.renderedFrame) aps.stamps}
 
 usePreviousRender: AnimationPlayerState a -> AnimationPlayerState a
 usePreviousRender aps =
@@ -164,10 +196,18 @@ addConcurrentAnimation aps now animation =
 -- Centiseconds -> AnimationPlayerState a -> AnimationPlayerState a
 processNonAnimationCommands now aps
  =  (case aps.commandQue of
+     (ClearCommandQue _::cs)    -> {aps|commandQue <- []}
+     (ClearCommandQueAnd v::cs) -> {aps|commandQue <- [v.command]}
+     (AddConcurrentAnimationImediately v::cs) ->
+      addConcurrentAnimation aps now v.animation |>
+      (\aps->{aps|commandQue<-cs}) |> processNonAnimationCommands now
+
      (SetMode v::cs) -> {aps|currentMode<-v.newMode
                             ,commandQue<-cs} |> processNonAnimationCommands now
      (AddConcurrentAnimation v::cs) ->
-       addConcurrentAnimation aps now v.animation|> processNonAnimationCommands now
+       addConcurrentAnimation aps now v.animation
+       |> (\aps->{aps|commandQue<-cs}) 
+       |> processNonAnimationCommands now
      (Wait v::cs) ->
        let
         waitAnimation=
@@ -175,9 +215,15 @@ processNonAnimationCommands now aps
           Just render ->
            {numFrames=v.delay
            ,framerate=100
-           ,render=(\_->render)}
+           ,render=(\_->render)
+           ,id=Nothing
+           ,stamp=False}
        in
        {aps|commandQue<-PlayAnimation {mode=v.mode,animation=waitAnimation}::cs}
+     (DeleteStamp v::cs) ->
+       {aps|stamps<-filter (\stamp->stamp.id/=v.id) aps.stamps}
+     (DeleteConcurrentAnimation v::cs) ->
+       {aps|concurrentAnimations<-filter (\concurrentAnimation->concurrentAnimation.animation.id/=v.id) aps.concurrentAnimations}
      _ -> aps)
  
 thereIsAnAnimation: AnimationPlayerState a -> Bool
@@ -199,9 +245,19 @@ nextCommands aps =
 
 --processEndOfAnimation: AnimationPlayerState a -> Centiseconds -> AnimationPlayerState a
 processEndOfAnimation aps now =
+  let
+   endingAnimation = currentAnimation aps
+   newStamps =
+    if endingAnimation.stamp
+    then
+     case aps.previousRender of
+      Just render -> {id=endingAnimation.id,renderedFrame=render}::aps.stamps
+    else aps.stamps
+  in
   {aps|commandQue<-nextCommands aps
       ,startOfCurrentAnimation<-now
-      ,previousFrame<-0-1}
+      ,previousFrame<-0-1
+      ,stamps<-newStamps}
   |> processTick now
 
 addRender aps render = {aps|renderedFrames<-render::aps.renderedFrames}
